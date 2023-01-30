@@ -6,7 +6,7 @@ import simpledb.execution.Predicate;
  * A class to represent a fixed-width histogram over a single String-based
  * field.
  */
-public class StringHistogram {
+public class StringHistogram implements Histogram<String>{
     final IntHistogram hist;
 
     /**
@@ -61,6 +61,7 @@ public class StringHistogram {
         return stringToInt("");
     }
 
+    @Override
     /** Add a new value to thte histogram */
     public void addValue(String s) {
         int val = stringToInt(s);
@@ -76,6 +77,7 @@ public class StringHistogram {
      * @param s
      *            The string to apply op to
      */
+    @Override
     public double estimateSelectivity(Predicate.Op op, String s) {
         int val = stringToInt(s);
         return hist.estimateSelectivity(op, val);

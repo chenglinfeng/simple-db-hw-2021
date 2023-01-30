@@ -130,7 +130,9 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            final double IoCost = cost1 + card1 * cost2;
+            final double CpuCost = card1 * card2;
+            return IoCost + CpuCost;
         }
     }
 
@@ -176,6 +178,25 @@ public class JoinOptimizer {
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
         // some code goes here
+        if (t1pkey && t2pkey) {
+            card = Math.min(card1, card2);
+        } else if (!t1pkey && !t2pkey) {
+            card = Math.max(card1, card2);
+        } else {
+            card = t1pkey ? card2 : card1;
+        }
+        switch (joinOp) {
+            case EQUALS: {
+                break;
+            }
+            case NOT_EQUALS: {
+                card = card1 * card2 - card;
+                break;
+            }
+            default: {
+                card = card1 * card2 / 3;
+            }
+        }
         return card <= 0 ? 1 : card;
     }
 
@@ -237,8 +258,30 @@ public class JoinOptimizer {
             throws ParsingException {
 
         // some code goes here
-        //Replace the following
-        return joins;
+        final PlanCache pc = new PlanCache();
+        CostCard costCard = null;
+        for (int i = 1; i <= this.joins.size(); i++) {
+            final Set<Set<LogicalJoinNode>> subsets = enumerateSubsets(this.joins, i);
+            for (final Set<LogicalJoinNode> subPlan : subsets) {
+                double bestCost = Double.MAX_VALUE;
+                for (final LogicalJoinNode removeNode : subPlan) {
+                    final CostCard cc = computeCostAndCardOfSubplan(stats, filterSelectivities, removeNode, subPlan,
+                            bestCost, pc);
+                    if (cc != null) {
+                        bestCost = cc.cost;
+                        costCard = cc;
+                    }
+                }
+                if (bestCost != Double.MAX_VALUE) {
+                    pc.addPlan(subPlan, bestCost, costCard.card, costCard.plan);
+                }
+            }
+        }
+        if (costCard != null) {
+            return costCard.plan;
+        } else {
+            return joins;
+        }
     }
 
     // ===================== Private Methods =================================

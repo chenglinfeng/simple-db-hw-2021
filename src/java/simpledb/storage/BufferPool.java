@@ -4,6 +4,7 @@ import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
 import simpledb.common.DeadlockException;
+import simpledb.transaction.LockManager;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 import simpledb.util.LruCache;
@@ -12,6 +13,7 @@ import java.io.*;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -38,6 +40,8 @@ public class BufferPool {
 
     private final LruCache<PageId, Page> lruCache;
 
+    private final LockManager lockManager;
+
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -47,6 +51,7 @@ public class BufferPool {
     public BufferPool(int numPages) {
         // some code goes here
         this.lruCache = new LruCache<>(numPages);
+        this.lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -81,6 +86,11 @@ public class BufferPool {
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
+        final int lockType = perm == Permissions.READ_ONLY ? 0 : 1;
+        final int timeout = new Random().nextInt(2000) + 1000;
+        if (!this.lockManager.tryAcquireLock(pid, tid, lockType, timeout)) {
+            throw new TransactionAbortedException();
+        }
         final Page page = this.lruCache.get(pid);
         if (page != null) {
             return page;
@@ -112,6 +122,7 @@ public class BufferPool {
     public  void unsafeReleasePage(TransactionId tid, PageId pid) {
         // some code goes here
         // not necessary for lab1|lab2
+        this.lockManager.releaseLock(pid, tid);
     }
 
     /**
@@ -128,7 +139,7 @@ public class BufferPool {
     public boolean holdsLock(TransactionId tid, PageId p) {
         // some code goes here
         // not necessary for lab1|lab2
-        return false;
+        return this.lockManager.holdsLock(p, tid);
     }
 
     /**
@@ -141,6 +152,31 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid, boolean commit) {
         // some code goes here
         // not necessary for lab1|lab2
+        try {
+            if (commit) {
+                flushPages(tid);
+            } else {
+                reLoadPages(tid);
+            }
+            this.lockManager.releaseLockByTxn(tid);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** ReLoad all pages of the specified transaction from disk.
+     */
+    public synchronized void reLoadPages(TransactionId tid) throws IOException, DbException {
+        // some code goes here
+        // not necessary for lab1|lab2
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while (pageIterator.hasNext()) {
+            final Page page = pageIterator.next();
+            if (page.isDirty() == tid) {
+                discardPage(page.getId());
+                loadPageAndCache(page.getId());
+            }
+        }
     }
 
     /**
@@ -256,6 +292,13 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        final Iterator<Page> pageIterator = this.lruCache.valueIterator();
+        while (pageIterator.hasNext()) {
+            final Page page = pageIterator.next();
+            if (page.isDirty() == tid) {
+                flushPage(page);
+            }
+        }
     }
 
     /**

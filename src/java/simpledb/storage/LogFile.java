@@ -460,8 +460,44 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                final Long firstRecordPos = this.tidToFirstLogRecord.get(tid.getId());
+                this.raf.seek(firstRecordPos);
+                final HashSet<PageId> set = new HashSet<>();
+                while (true) {
+                    try {
+                        final int type = raf.readInt();
+                        final long transactionId = raf.readLong();
+                        switch (type) {
+                            case UPDATE_RECORD: {
+                                final Page beginPage = readPageData(this.raf);
+                                readPageData(this.raf);
+                                final PageId pageId = beginPage.getId();
+                                if (transactionId == tid.getId() && !set.contains(pageId)) {
+                                    set.add(pageId);
+                                    // Discard, rewrite page
+                                    Database.getBufferPool().discardPage(beginPage.getId());
+                                    Database.getCatalog().getDatabaseFile(pageId.getTableId()).writePage(beginPage);
+                                }
+                                break;
+                            }
+                            case CHECKPOINT_RECORD: {
+                                skipCheckPointRecord();
+                                break;
+                            }
+                        }
+                        raf.readLong();
+                    } catch (final EOFException e) {
+                        break;
+                    }
+                }
             }
         }
+    }
+
+    private void skipCheckPointRecord() throws IOException {
+        final int txnCnt = this.raf.readInt();
+        final int skip = txnCnt * 2 * 8;
+        this.raf.skipBytes(skip);
     }
 
     /** Shutdown the logging system, writing out whatever state
@@ -487,6 +523,65 @@ public class LogFile {
             synchronized (this) {
                 recoveryUndecided = false;
                 // some code goes here
+                this.raf.seek(0);
+                final long cp = raf.readLong();
+                if (cp > 0) {
+                    this.raf.seek(cp);
+                }
+                final HashSet<Long> commitIds = new HashSet<>();
+                final HashMap<Long, List<Page>> beforePages = new HashMap<>();
+                final HashMap<Long, List<Page>> afterPages = new HashMap<>();
+                while (true) {
+                    try {
+                        final int type = this.raf.readInt();
+                        final long tid = this.raf.readLong();
+                        switch (type) {
+                            case UPDATE_RECORD: {
+                                final Page beforePage = readPageData(raf);
+                                final Page afterPage = readPageData(raf);
+
+                                final List<Page> beforeList = beforePages.getOrDefault(tid, new ArrayList<>());
+                                beforeList.add(beforePage);
+
+                                final List<Page> afterList = afterPages.getOrDefault(tid, new ArrayList<>());
+                                afterList.add(afterPage);
+                                break;
+                            }
+                            case COMMIT_RECORD: {
+                                commitIds.add(tid);
+                                break;
+                            }
+                            case CHECKPOINT_RECORD: {
+                                skipCheckPointRecord();
+                                break;
+                            }
+                        }
+                    } catch (final EOFException e) {
+                        break;
+                    }
+                }
+                // Roll back unCommitted txn
+                beforePages.forEach((tid, pages) -> {
+                    if (!commitIds.contains(tid)) {
+                        for (final Page page : pages) {
+                            try {
+                                Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                });
+                // Write commit pages
+                for (final Long commitId : commitIds) {
+                    if (afterPages.containsKey(commitId)) {
+                        final List<Page> pages = afterPages.get(commitId);
+                        for (final Page page : pages) {
+                            Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        }
+                    }
+                }
+
             }
          }
     }

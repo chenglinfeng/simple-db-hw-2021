@@ -133,6 +133,7 @@ public class BufferPool {
     public void transactionComplete(TransactionId tid) {
         // some code goes here
         // not necessary for lab1|lab2
+
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
@@ -271,11 +272,11 @@ public class BufferPool {
         // not necessary for lab1
         try {
             // for lab6, write update record first
-            //            final LogFile logFile = Database.getLogFile();
-            //            if (page.isDirty() != null) {
-            //                logFile.logWrite(page.isDirty(), page.getBeforeImage(), page);
-            //                logFile.force();
-            //            }
+//                        final LogFile logFile = Database.getLogFile();
+//                        if (page.isDirty() != null) {
+//                            logFile.logWrite(page.isDirty(), page.getBeforeImage(), page);
+//                            logFile.force();
+//                        }
 
             // Write page
             final DbFile tableFile = Database.getCatalog().getDatabaseFile(page.getId().getTableId());
